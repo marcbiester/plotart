@@ -3,6 +3,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# graphics created
+*.svg
+*.png
+
 # C extensions
 *.so
 
