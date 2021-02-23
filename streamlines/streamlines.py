@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy import interpolate
 
 
 class streamLines:
@@ -11,16 +12,20 @@ class streamLines:
         self.X = []
         self.Y = []
         self.psis = []
-        self.grid = self.generate_grid(grid)
-        self.psi = np.zeros(self.X.shape)
-        self.u = np.zeros(self.X.shape)
-        self.v = np.zeros(self.X.shape)
+        self.streamtraces=[]
+        self.grid = grid
+        grid_shape = (grid['no_points_x'], grid['no_points_y'])
+        self.psi = np.zeros(grid_shape)
+        self.u = np.zeros(grid_shape)
+        self.v = np.zeros(grid_shape)
+        self.generate_mesh()
 
-    def generate_grid(self, grid):
-        self.x = np.linspace(grid["x_start"], grid["x_end"], grid["no_points_x"])
-        self.y = np.linspace(grid["y_start"], grid["y_end"], grid["no_points_y"])
-        self.dx = (grid["x_end"] - grid["x_start"]) / grid["no_points_x"]
-        self.dy = (grid["y_end"] - grid["y_start"]) / grid["no_points_y"]
+
+    def generate_mesh(self):
+        self.x = np.linspace(self.grid["x_start"], self.grid["x_end"], self.grid["no_points_x"])
+        self.y = np.linspace(self.grid["y_start"], self.grid["y_end"], self.grid["no_points_y"])
+        self.dx = (self.grid["x_end"] - self.grid["x_start"]) / self.grid["no_points_x"]
+        self.dy = (self.grid["y_end"] - self.grid["y_start"]) / self.grid["no_points_y"]
         self.X, self.Y = np.meshgrid(self.x, self.y)
 
     def add_source_sink(self, strength, x, y):
@@ -137,9 +142,41 @@ class streamLines:
         if len(self.psis > 0):
             for i in range(1, len(self.psis)):
                 self.psi = np.add(self.psi, self.psis[i])
+    
+    
+    def _point_in_range(self, point):
+        if point[0] < self.grid['x_start'] or point[0] > self.grid['x_end'] or \
+            point[1] < self.grid['y_start'] or point[1] > self.grid['y_end']:
+            return False
+        else:
+            return True
 
+    
+    def calc_streamtraces(self, n_streamtraces=10, dt=0.01, maxiter=200):
+        u_i=interpolate.interp2d(self.x, self.y, self.u)
+        v_i=interpolate.interp2d(self.x, self.y, self.v)
+        
+        for trace in range(n_streamtraces):
+            p=[np.random.uniform(self.grid['x_start'], self.grid['x_end']), np.random.uniform(self.grid['y_start'], self.grid['y_end'])]
+            ps=[]
+            n=0
+            while self._point_in_range(p) and n <= maxiter:
+                ps.append(p.copy())
+                dx=u_i(p[0], p[1])[0]*dt
+                dy=v_i(p[0], p[1])[0]*dt
+                p[0]=p[0]+dx
+                p[1]=p[1]+dy
+                n+=1
+            self.streamtraces.append(ps)
+
+
+
+    
+    
     def plot(self, num_level=25, legend=True):
         fig, ax = plt.subplots(figsize=(12, 10))
         c = ax.contour(self.x, self.y, self.psi, num_level)
         if legend:
             fig.colorbar(c, ax=ax, shrink=0.9)
+    
+
