@@ -13,6 +13,8 @@ class streamLines:
         self.Y = []
         self.psis = []
         self.streamtraces=[]
+        self.source_sink=[]
+        self.seeds=[]
         self.grid = grid
         grid_shape = (grid['no_points_x'], grid['no_points_y'])
         self.psi = np.zeros(grid_shape)
@@ -46,6 +48,7 @@ class streamLines:
         psi: 2D Numpy array of floats
             The stream-function.
         """
+        self.source_sink.append([x,y,strength])
         psi = strength / (2 * np.pi) * np.arctan2((self.Y - y), (self.X - x))
         self.psis.append(psi)
         self.psi = np.add(self.psi, psi)
@@ -144,23 +147,49 @@ class streamLines:
                 self.psi = np.add(self.psi, self.psis[i])
     
     
-    def _point_in_range(self, point):
+    def _point_in_canvas(self, point):
         if point[0] < self.grid['x_start'] or point[0] > self.grid['x_end'] or \
             point[1] < self.grid['y_start'] or point[1] > self.grid['y_end']:
             return False
         else:
             return True
-
+        
+    def _circle_points(self, p, r, n_points):
+        points=[]
+        for alpha in np.linspace(0,2*np.pi,n_points+1):
+            points.append([p[0]+np.cos(alpha)*r, p[1]+np.sin(alpha)*r])
+        return points
     
-    def calc_streamtraces(self, n_streamtraces=10, dt=0.01, maxiter=200):
+    def calc_streamtraces(self, n_streamtraces=10, dt=0.005, maxiter=500, radius=0.1, seeds=['random']):
         u_i=interpolate.interp2d(self.x, self.y, self.u)
         v_i=interpolate.interp2d(self.x, self.y, self.v)
+
+        if not isinstance(seeds, list):
+            raise Exception('seeds argument must be list')
         
-        for trace in range(n_streamtraces):
-            p=[np.random.uniform(self.grid['x_start'], self.grid['x_end']), np.random.uniform(self.grid['y_start'], self.grid['y_end'])]
+        for item in seeds:
+            if item=='random':
+                xs = np.random.uniform(self.grid['x_start'], self.grid['x_end'], size=n_streamtraces)
+                ys = np.random.uniform(self.grid['y_start'], self.grid['y_end'], size=n_streamtraces)
+                self.seeds.extend(np.dstack((xs,ys))[0].tolist())
+
+            elif item=='sources':
+                seeds_center = [[x[0], x[1]] for x in self.source_sink if x[2] > 0]
+                n_streamstraces_per_source = int(n_streamtraces / len(seeds_center))
+                for p in seeds_center:
+                    self.seeds.extend(self._circle_points(p, radius, n_streamstraces_per_source))
+
+            elif item == 'grid':
+                grid_points=np.dstack((self.X.flatten(), self.Y.flatten()))[0]
+                gridskip = int(self.grid['no_points_x']*self.grid['no_points_y'] / n_streamtraces)
+                self.seeds.extend(grid_points[::gridskip])
+
+                        
+        for seed in self.seeds:
             ps=[]
             n=0
-            while self._point_in_range(p) and n <= maxiter:
+            p=seed.copy()
+            while self._point_in_canvas(p) and n <= maxiter:
                 ps.append(p.copy())
                 dx=u_i(p[0], p[1])[0]*dt
                 dy=v_i(p[0], p[1])[0]*dt
@@ -169,10 +198,7 @@ class streamLines:
                 n+=1
             self.streamtraces.append(ps)
 
-
-
-    
-    
+   
     def plot(self, num_level=25, legend=True):
         fig, ax = plt.subplots(figsize=(12, 10))
         c = ax.contour(self.x, self.y, self.psi, num_level)
