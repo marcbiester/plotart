@@ -1,7 +1,27 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy import interpolate
+from multiprocessing import Pool
+from functools import partial
 
+def compute_trace(p, maxiter, grid, u_i, v_i, dt):
+    ps=[]
+    n=0
+    while point_in_canvas(p, grid) and n <= maxiter:
+        ps.append(p.copy())
+        dx=u_i(p[0], p[1])[0]*dt
+        dy=v_i(p[0], p[1])[0]*dt
+        p[0]=p[0]+dx
+        p[1]=p[1]+dy
+        n+=1
+    return ps
+
+def point_in_canvas(point, grid):
+    if point[0] < grid['x_start'] or point[0] > grid['x_end'] or \
+        point[1] < grid['y_start'] or point[1] > grid['y_end']:
+        return False
+    else:
+        return True
 
 class streamLines:
     def __init__(self, grid):
@@ -146,21 +166,14 @@ class streamLines:
             for i in range(1, len(self.psis)):
                 self.psi = np.add(self.psi, self.psis[i])
     
-    
-    def _point_in_canvas(self, point):
-        if point[0] < self.grid['x_start'] or point[0] > self.grid['x_end'] or \
-            point[1] < self.grid['y_start'] or point[1] > self.grid['y_end']:
-            return False
-        else:
-            return True
-        
+
     def _circle_points(self, p, r, n_points):
         points=[]
         for alpha in np.linspace(0,2*np.pi,n_points+1):
             points.append([p[0]+np.cos(alpha)*r, p[1]+np.sin(alpha)*r])
         return points
     
-    def calc_streamtraces(self, n_streamtraces=10, dt=0.005, maxiter=500, radius=0.1, seeds=['random']):
+    def calc_streamtraces(self, n_streamtraces=10, dt=0.005, maxiter=500, radius=0.1, seeds=['random'], n_cpu=2):
         u_i=interpolate.interp2d(self.x, self.y, self.u)
         v_i=interpolate.interp2d(self.x, self.y, self.v)
 
@@ -182,21 +195,13 @@ class streamLines:
             elif item == 'grid':
                 grid_points=np.dstack((self.X.flatten(), self.Y.flatten()))[0]
                 gridskip = int(self.grid['no_points_x']*self.grid['no_points_y'] / n_streamtraces)
-                self.seeds.extend(grid_points[::gridskip])
+                self.seeds.extend(grid_points[::gridskip].tolist())
+                
+            with Pool(n_cpu) as pool:
+                self.streamtraces = pool.map(partial(compute_trace, maxiter=maxiter, grid=self.grid, u_i=u_i, v_i=v_i, dt=dt), self.seeds)
 
-                        
-        for seed in self.seeds:
-            ps=[]
-            n=0
-            p=seed.copy()
-            while self._point_in_canvas(p) and n <= maxiter:
-                ps.append(p.copy())
-                dx=u_i(p[0], p[1])[0]*dt
-                dy=v_i(p[0], p[1])[0]*dt
-                p[0]=p[0]+dx
-                p[1]=p[1]+dy
-                n+=1
-            self.streamtraces.append(ps)
+    
+
 
    
     def plot(self, num_level=25, legend=True):
