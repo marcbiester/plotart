@@ -173,7 +173,7 @@ class streamLines:
             points.append([p[0]+np.cos(alpha)*r, p[1]+np.sin(alpha)*r])
         return points
     
-    def calc_streamtraces(self, n_streamtraces=10, dt=0.005, maxiter=500, radius=0.1, seeds=['random'], n_cpu=2):
+    def calc_streamtraces(self, n_streamtraces=10, dt=0.005, maxiter=500, radius=0.1, seeds=['random'], n_cpu=1):
         u_i=interpolate.interp2d(self.x, self.y, self.u)
         v_i=interpolate.interp2d(self.x, self.y, self.v)
 
@@ -197,10 +197,12 @@ class streamLines:
                 gridskip = int(self.grid['no_points_x']*self.grid['no_points_y'] / n_streamtraces)
                 self.seeds.extend(grid_points[::gridskip].tolist())
                 
-            with Pool(n_cpu) as pool:
-                self.streamtraces = pool.map(partial(compute_trace, maxiter=maxiter, grid=self.grid, u_i=u_i, v_i=v_i, dt=dt), self.seeds)
-
-    
+            if n_cpu > 1:
+                with Pool(n_cpu) as pool:
+                    self.streamtraces = pool.map(partial(compute_trace, maxiter=maxiter, grid=self.grid, u_i=u_i, v_i=v_i, dt=dt), self.seeds)
+            else:
+                for seed in seeds:
+                    self.streamtraces.append(compute_trace(seed, maxiter=maxiter, grid=self.grid, u_i=u_i, v_i=v_i, dt=dt))
 
 
    

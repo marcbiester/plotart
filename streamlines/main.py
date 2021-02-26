@@ -11,28 +11,28 @@ grid = {
     "no_points_x": 100,
     "no_points_y": 100,
 }
-pic = 5
+pic = 1
 while True:
     try:
         t1 = datetime.datetime.now()
         self = streamLines(grid)
 
-        for i in range(np.random.randint(1, 200)):
+        for i in range(np.random.randint(1, 400)):
             x, y = np.random.uniform(-5, 5), np.random.uniform(-3.5, 3.5)
             self.add_vortex(np.random.uniform(-10, 10), x, y)
             self.add_source_sink(np.random.uniform(-3, 3), x, y)
 
-        for i in range(np.random.randint(1, 200)):
+        for i in range(np.random.randint(1, 400)):
             x, y = np.random.uniform(-5, 5), np.random.uniform(-3.5, 3.5)
             self.add_source_sink(np.random.uniform(-3, 3), x, y)
 
         plt.figure(figsize=(420 / 25.4, 297 / 25.4))
         random_seed_setting = np.random.choice(['random','sources','grid'], np.random.randint(1,4)).tolist()
         self.calc_streamtraces(
-            n_streamtraces=np.random.randint(100, 1000),
+            n_streamtraces=np.random.randint(200, 2000),
             seeds=random_seed_setting,
             dt=0.001,
-            maxiter=np.random.randint(200, 8000),
+            maxiter=np.random.randint(100, 15000),
             radius=np.random.uniform(0.02, 0.2),
             n_cpu=4,
         )
