@@ -9,6 +9,7 @@ __pycache__/
 
 # Visual Studio Code
 */.vscode/*
+.vscode
 
 # C extensions
 *.so
