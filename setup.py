@@ -20,8 +20,8 @@ setup(
         "scipy",
         "multiprocessing",
         "functools",
-        "matplotlib"
-    ]
+        "matplotlib",
+    ],
 
     python_requires=">=3.7",
 )
