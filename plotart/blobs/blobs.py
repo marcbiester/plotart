@@ -17,6 +17,7 @@ class Blob:
         size=10,
         clearance=0,
         pic=[],
+        pic_shape=[],
         max_iter=0,
         mask=[],
     ):
@@ -46,17 +47,35 @@ class Blob:
     def _seeds_from_pic(self):
         img = Image.open(self.pic).convert("L")
         img = np.array(img)
-        img = (255 - img) + 5
+        self.pic_shape=np.array(img.shape)/img.shape[0]*self.size
+        img = 255 - img
+        img[img == 0] = 15
         img = img / np.sum(img)
 
+        num_loops = 0
+        random_points=[]
         flat = img.flatten()
-        sample_index = np.random.choice(a=flat.size, p=flat, size=self.r_p)
-        adjusted_index = np.unravel_index(sample_index, img.shape)
-        adjusted_index = list(zip(*adjusted_index))
-        self.seeds = [
-            (x[0] / img.shape[0], x[1] / img.shape[0] * img.shape[1])
-            for x in adjusted_index
-        ]
+
+        while len(random_points) < self.r_p and num_loops < 1000:
+            sample_index = np.random.choice(
+                a=flat.size, p=flat, size=self.r_p - len(random_points)
+            )
+            adjusted_index = np.unravel_index(sample_index, img.shape)
+            adjusted_index = list(zip(*adjusted_index))
+            if num_loops == 0:
+                        random_points = [(x[0] / img.shape[0]*self.size, x[1] / img.shape[0]*self.size) for x in adjusted_index]
+            else:
+                random_points = np.append(
+                    random_points,
+                    [(x[0] / img.shape[0], x[1] / img.shape[0]) for x in adjusted_index],
+                    axis=0)
+            random_points = self._check_distance(random_points)
+            num_loops += 1
+        if num_loops == 1000:
+            print(
+                f"Warning. Exceeded max number of seeding iterations ({num_loops}). Only having {len(random_points)} seeds. Reduce l_min to get more seeding."
+            )
+        self.seeds = random_points
 
     def _check_distance(self, points):
         # calculate distance matrix
@@ -160,12 +179,19 @@ class Blob:
         blob = self._blob2coords(blob)
         blob = Polygon(blob)
         blob = blob.buffer(self.clearance / 2, join_style=2)
-        if not self.mask:
+
+        if self.mask:
+            borders = self.mask
+        elif self.pic:
+            borders = Polygon(
+                [(0, 0), (0, self.pic_shape[1]), (self.pic_shape[0], self.pic_shape[1]), (self.pic_shape[0], 0)]
+            )
+        else:
             borders = Polygon(
                 [(0, 0), (0, self.size), (self.size, self.size), (self.size, 0)]
             )
-        else:
-            borders = self.mask
+
+            
         collision = False
         for other_blob in polygon_blobs:
             if blob.intersects(other_blob) or not blob.within(borders):
@@ -174,7 +200,7 @@ class Blob:
 
         return collision
 
-    def _grow_blobs(self):
+    def _grow_blobs(self, iter2png=False):
         n = 0
         max_iter = 999999 if self.max_iter == 0 else self.max_iter
         while sum([x[-1] for x in self.blobs]) != len(self.blobs) and n < max_iter:
@@ -204,6 +230,8 @@ class Blob:
                         if n_edges == col_edges:
                             blob[-1] = True
                 self.blobs[i] = blob
+            if iter2png:
+                self.blobs2png(n)
 
     def _plot_blobs(self):
         _, ax = plt.subplots(figsize=(12, 12))
@@ -213,5 +241,11 @@ class Blob:
 
         ax.axis("equal")
         ax.autoscale(enable=True, axis="both")
-        ax.axis('off')
+        ax.axis("off")
         return ax
+
+    def blobs2png(self, n):
+        ax = self._plot_blobs()
+        plt.savefig(f"pixel_{n:05d}.png")
+        plt.savefig(f"vector_{n:05d}.svg")
+        plt.close("all")
