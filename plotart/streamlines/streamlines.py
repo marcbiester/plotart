@@ -242,6 +242,9 @@ class streamLines:
                 )
                 self.seeds.extend(grid_points[::gridskip].tolist())
 
+            elif item == "custom":
+                print("using cutsom seeds")
+
             sinks = [[x[0], x[1]] for x in self.source_sink if x[2] < 0]
             if n_cpu > 1:
                 with Pool(n_cpu) as pool:
@@ -273,30 +276,31 @@ class streamLines:
                         )
                     )
 
-    def write_svg(self, file, height=297, width=420, offset_x=420/2, offset_y=297/2):
+    def write_svg(
+        self, file, height=297, width=420, offset_x=420 / 2, offset_y=297 / 2
+    ):
         print("writing to svg ...", end="")
-        dx=self.grid["x_end"]-self.grid["x_start"]
-        fx = width/dx
-        dy=self.grid["y_end"]-self.grid["y_start"]
-        fy = height/dy
-
+        dx = self.grid["x_end"] - self.grid["x_start"]
+        fx = width / dx
+        dy = self.grid["y_end"] - self.grid["y_start"]
+        fy = height / dy
 
         f = open(file, "w")
         f.write(f'<svg height="{height}" width="{width}">')
 
-        d=""
+        d = ""
 
         for streamline in self.streamtraces:
-            #d += f'<circle cx="{seed[1]}" cy="{seed[0]}" r="5" fill="none" stroke="black" />\n'
+            # d += f'<circle cx="{seed[1]}" cy="{seed[0]}" r="5" fill="none" stroke="black" />\n'
             if len(streamline) > 2:
                 d += f'<path d="M {streamline[0][0]*fx + offset_x} {streamline[0][1]*fy + offset_y} '
-                for i in range(len(streamline) -1):
-                    d += f'L {streamline[i+1][0]*fx + offset_x} {streamline[i+1][1]*fy + offset_y} '
+                for i in range(len(streamline) - 1):
+                    d += f"L {streamline[i+1][0]*fx + offset_x} {streamline[i+1][1]*fy + offset_y} "
                 d += '" stroke="black" fill="none" />\n'
         f.write(d)
         f.write("</svg>")
         f.close()
-    
+
     def plot(self, num_level=25, legend=True):
         fig, ax = plt.subplots(figsize=(12, 10))
         c = ax.contour(self.x, self.y, self.psi, num_level)
