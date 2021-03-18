@@ -3,7 +3,9 @@ import matplotlib.pyplot as plt
 from scipy import interpolate
 from multiprocessing import Pool
 from functools import partial
-import functools
+from xml.dom import minidom
+import re
+from svgpathtools import parse_path
 
 
 def point_distance(p1, p2):
@@ -11,7 +13,7 @@ def point_distance(p1, p2):
 
 
 def check_sink_proximity(p, sinks, maxdist=0.1):
-    f = functools.partial(point_distance, p2=p)
+    f = partial(point_distance, p2=p)
     dist = list(map(f, sinks))
     return any(x < maxdist for x in dist)
 
@@ -61,13 +63,126 @@ class streamLines:
         self.psis = []
         self.streamtraces = []
         self.source_sink = []
+        self.vortices=[]
         self.seeds = []
+        self.sl_config = {}
         self.grid = grid
         grid_shape = (grid["no_points_x"], grid["no_points_y"])
         self.psi = np.zeros(grid_shape)
         self.u = np.zeros(grid_shape)
         self.v = np.zeros(grid_shape)
         self.generate_mesh()
+
+    def init_from_svg(
+        self,
+        file,
+        config={
+            "source_color": "000000",  # black
+            "sink_color": "ff0000",  # red
+            "seeds_color": "00ff00",  # green
+            "vortex_color_cw": "0000ff",  # blue
+            "vortex_color_ccw": "000080",  # navy
+            "source_strength_default": 0.1,
+            "sink_strength_default": -0.1,
+            "vortex_default_strength": 0.1,
+            "points_per_unit_length": 1,
+            "scale": 5,
+        },
+        plot=False,
+    ):
+
+        sources = []
+        sinks = []
+        seeds = []
+        vortices = []
+        vortices_strength = []
+        sinks_strength = []
+        sources_strength = []
+
+        svg_xml = minidom.parse("test.svg")
+        paths = svg_xml.getElementsByTagName("path")
+        circles = svg_xml.getElementsByTagName("circle")
+        for path in paths:
+            path = path.toxml()
+            color = re.findall(r"#([a-f,0-9]{6})", path)[0]
+            d = re.findall(r'\sd="([A-Z,a-z,0-9,\s,\.,\-]*)"', path)[0]
+            path = parse_path(d)
+            num_samples = int(path.length() * config["points_per_unit_length"])
+            if color == config["sink_color"]:
+                for j in range(num_samples):
+                    sinks.append(path.point(j / num_samples))
+                    sinks_strength.append(config["sink_strength_default"])
+            elif color == config["source_color"]:
+                for j in range(num_samples):
+                    sources.append(path.point(j / num_samples))
+                    sources_strength.append(config["source_strength_default"])
+            elif color == config["seeds_color"]:
+                for j in range(num_samples):
+                    seeds.append(path.point(j / num_samples))
+            elif color == config["vortex_color"]:
+                for j in range(num_samples):
+                    vortices.append(path.point(j / num_samples))
+                    vortices_strength.append(config["vortex_default_strength"])
+            else:
+                raise Exception("Please make sure features are definded for colors")
+
+        for circle in circles:
+            circle = circle.toxml()
+            cx = float(re.findall(r'\scx="([0-9,\.,\-]*)"', circle)[0])
+            cy = float(re.findall(r'\scy="([0-9,\.,\-]*)"', circle)[0])
+            r = float(re.findall(r'\sr="([0-9,\.]*)"', circle)[0])
+            color = re.findall(r"#([a-f,0-9]{6})", circle)[0]
+            c = complex(cx, cy)
+
+            if color == config["sink_color"]:
+                sinks.append(c)
+                sinks_strength.append(-r * config["scale"])
+            elif color == config["source_color"]:
+                sources.append(c)
+                sources_strength.append(r * config["scale"])
+            elif color == config["seeds_color"]:
+                seeds.append(c)
+            elif color == config["vortex_color_cw"]:
+                vortices.append(c)
+                vortices_strength.append(r * config["scale"])
+            elif color == config["vortex_color_ccw"]:
+                vortices.append(c)
+                vortices_strength.append(-r * config["scale"])
+
+        if plot:
+            _, ax1 = plt.subplots()
+            ax1.scatter(
+                [x.real for x in sinks],
+                [x.imag for x in sinks],
+                color="#" + config["sink_color"],
+            )
+            ax1.scatter(
+                [x.real for x in sources],
+                [x.imag for x in sources],
+                color="#" + config["source_color"],
+            )
+            ax1.scatter(
+                [x.real for x in seeds],
+                [x.imag for x in seeds],
+                color="#" + config["seeds_color"],
+            )
+            ax1.scatter(
+                [x.real for x in vortices],
+                [x.imag for x in vortices],
+                color="#" + config["vortex_color_cw"],
+            )
+
+            ax1.invert_yaxis()
+
+        self.seeds = [[x.real, x.imag] for x in seeds]
+        for i in range(len(sources)):
+            self.add_source_sink(sources_strength[i], sources[i].real, sources[i].imag)
+
+        for i in range(len(sinks)):
+            self.add_source_sink(sinks_strength[i], sinks[i].real, sinks[i].imag)
+
+        for i in range(len(vortices)):
+            self.add_vortex(vortices_strength[i], vortices[i].real, vortices[i].imag)
 
     def generate_mesh(self):
         self.x = np.linspace(
@@ -180,6 +295,7 @@ class streamLines:
         Y: 2D Numpy array of floats
             y-coordinate of the mesh points.
         """
+        self.vortices.append([x, y, strength])
         psi = strength / (4 * np.pi) * np.log((self.X - x) ** 2 + (self.Y - y) ** 2)
         self.psis.append(psi)
         self.psi = np.add(self.psi, psi)
@@ -208,9 +324,20 @@ class streamLines:
         dt=0.005,
         maxiter=500,
         radius=0.1,
+        max_sink_dist=0.1,
         seeds=["random"],
         n_cpu=1,
     ):
+
+        self.sl_config = {
+            "n_streamtraces": n_streamtraces,
+            "dt": dt,
+            "maxiter": maxiter,
+            "radius": radius,
+            "max_sink_dist": max_sink_dist,
+            "seeds": seeds,
+        }
+
         u_i = interpolate.interp2d(self.x, self.y, self.u)
         v_i = interpolate.interp2d(self.x, self.y, self.v)
 
@@ -242,9 +369,6 @@ class streamLines:
                 )
                 self.seeds.extend(grid_points[::gridskip].tolist())
 
-            elif item == "custom":
-                print("using cutsom seeds")
-
             sinks = [[x[0], x[1]] for x in self.source_sink if x[2] < 0]
             if n_cpu > 1:
                 with Pool(n_cpu) as pool:
@@ -252,7 +376,7 @@ class streamLines:
                         partial(
                             compute_trace,
                             maxiter=maxiter,
-                            max_sink_dist=0.1,
+                            max_sink_dist=max_sink_dist,
                             sinks=sinks,
                             grid=self.grid,
                             u_i=u_i,
@@ -267,7 +391,7 @@ class streamLines:
                         compute_trace(
                             seed,
                             maxiter=maxiter,
-                            max_sink_dist=0.1,
+                            max_sink_dist=max_sink_dist,
                             sinks=sinks,
                             grid=self.grid,
                             u_i=u_i,
@@ -275,6 +399,56 @@ class streamLines:
                             dt=dt,
                         )
                     )
+
+    def write_svg_init(
+        self,
+        file,
+        config={
+            "source_color": "000000",  # black
+            "sink_color": "ff0000",  # red
+            "seeds_color": "00ff00",  # green
+            "vortex_color_cw": "0000ff",  # blue
+            "vortex_color_ccw": "000080",  # navy)
+            "scale": 5,
+        },
+    ):
+        sources = [x for x in self.source_sink if x[2] >=0]
+        sinks = [x for x in self.source_sink if x[2] <0]
+
+
+        f = open(file, "w")
+        f.write(
+            f"""<svg height="{self.grid['y_end'] - self.grid['y_start']}" width="{self.grid['x_end'] - self.grid['x_start']}">"""
+        )
+
+        for source in sources:
+            f.write(
+                f"""<circle cx="{source[0]}" cy="{source[1]}" r="{source[2] / config['scale']}" fill="none" stroke="#{config['source_color']}" />\n"""
+            )
+        for sink in sinks:
+            f.write(
+                f"""<circle cx="{sink[0]}" cy="{sink[1]}" r="{abs(sink[2])/ config['scale']}" fill="none" stroke="#{config['sink_color']}" />\n"""
+            )
+        for vortex in self.vortices:
+            if vortex[0] >= 0:
+                color = config["vortex_color_cw"]
+            else:
+                color = config["vortex_color_ccw"]
+            f.write(
+                f"""<circle cx="{vortex[0]}" cy="{vortex[1]}" r="{abs(vortex[2])/ config['scale']}" fill="none" stroke="#{color}" />\n"""
+            )
+        for seed in self.seeds:
+            f.write(
+                f"""<circle cx="{seed[0]}" cy="{seed[1]}" r="{config['scale']}" fill="none" stroke="#{config['seeds_color']}" />\n"""
+            )
+
+        y = -100
+        for key in self.sl_config.keys():
+            f.write(f"""<text x="0" y="{y}">{key}:{self.sl_config[key]}</text>""")
+            y += 10
+
+        f.write("</svg>")
+        f.close()
 
     def write_svg(
         self, file, height=297, width=420, offset_x=420 / 2, offset_y=297 / 2
