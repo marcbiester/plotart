@@ -232,7 +232,7 @@ class streamLines:
 
     def add_free_stream(self, u_inf=0, v_inf=0):
         psi = u_inf * self.Y - v_inf * self.X
-        self.psis.append(psi)dir(sl)
+        self.psis.append(psi)
         self.psi = np.add(self.psi, psi)
         self.u = self.u + u_inf
         self.v = self.v + v_inf
