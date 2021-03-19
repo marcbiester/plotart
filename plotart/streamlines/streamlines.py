@@ -99,7 +99,7 @@ class streamLines:
         sinks_strength = []
         sources_strength = []
 
-        svg_xml = minidom.parse("test.svg")
+        svg_xml = minidom.parse(file)
         paths = svg_xml.getElementsByTagName("path")
         circles = svg_xml.getElementsByTagName("circle")
         for path in paths:
@@ -232,7 +232,7 @@ class streamLines:
 
     def add_free_stream(self, u_inf=0, v_inf=0):
         psi = u_inf * self.Y - v_inf * self.X
-        self.psis.append(psi)
+        self.psis.append(psi)dir(sl)
         self.psi = np.add(self.psi, psi)
         self.u = self.u + u_inf
         self.v = self.v + v_inf
@@ -430,7 +430,7 @@ class streamLines:
                 f"""<circle cx="{sink[0]}" cy="{sink[1]}" r="{abs(sink[2])/ config['scale']}" fill="none" stroke="#{config['sink_color']}" />\n"""
             )
         for vortex in self.vortices:
-            if vortex[0] >= 0:
+            if vortex[2] >= 0:
                 color = config["vortex_color_cw"]
             else:
                 color = config["vortex_color_ccw"]
@@ -439,7 +439,7 @@ class streamLines:
             )
         for seed in self.seeds:
             f.write(
-                f"""<circle cx="{seed[0]}" cy="{seed[1]}" r="{config['scale']}" fill="none" stroke="#{config['seeds_color']}" />\n"""
+                f"""<circle cx="{seed[0]}" cy="{seed[1]}" r="1" fill="none" stroke="#{config['seeds_color']}" />\n"""
             )
 
         y = -100
