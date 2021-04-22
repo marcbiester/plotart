@@ -18,14 +18,14 @@ def check_sink_proximity(p, sinks, maxdist=0.1):
     return any(x < maxdist for x in dist)
 
 
-def compute_trace(p, maxiter, max_sink_dist, grid, u_i, v_i, dt, sinks, limit=1500):
+def compute_trace(p, maxiter, max_sink_dist, grid, u_i, v_i, dt, sinks, limit=1500, max_iter_sink_proximity=0):
     ps = []
     n = 0
     sink_soak = 0
     while (
         point_in_canvas(p, grid)
         and n <= maxiter
-        and sink_soak < 30  # allow only 20 more steps if getting close to sink
+        and sink_soak <= max_iter_sink_proximity  # allow only 20 more steps if getting close to sink
     ):
         ps.append(p.copy())
         dx = u_i(p[0], p[1])[0] * dt
@@ -53,7 +53,7 @@ def point_in_canvas(point, grid):
 
 
 class streamLines:
-    def __init__(self, grid):
+    def __init__(self, grid, colors=['#000000']):
         self.x = []
         self.y = []
         self.dx = []
@@ -61,7 +61,9 @@ class streamLines:
         self.X = []
         self.Y = []
         self.psis = []
+        self.colors = colors
         self.streamtraces = []
+        self.streamtraces_color = []
         self.source_sink = []
         self.vortices=[]
         self.seeds = []
@@ -325,6 +327,7 @@ class streamLines:
         maxiter=500,
         radius=0.1,
         max_sink_dist=0.1,
+        max_iter_sink_proximity=0,
         seeds=["random"],
         n_cpu=1,
     ):
@@ -353,6 +356,7 @@ class streamLines:
                     self.grid["y_start"], self.grid["y_end"], size=n_streamtraces
                 )
                 self.seeds.extend(np.dstack((xs, ys))[0].tolist())
+                self.streamtraces_color.append(np.random.choice(self.colors))
 
             elif item == "sources":
                 seeds_center = [[x[0], x[1]] for x in self.source_sink if x[2] > 0]
@@ -361,6 +365,8 @@ class streamLines:
                     self.seeds.extend(
                         self._circle_points(p, radius, n_streamstraces_per_source)
                     )
+                    self.streamtraces_color.extend((n_streamstraces_per_source + 1) * [np.random.choice(self.colors)])
+                    print(p, self.streamtraces_color)
 
             elif item == "grid":
                 grid_points = np.dstack((self.X.flatten(), self.Y.flatten()))[0]
@@ -368,6 +374,8 @@ class streamLines:
                     self.grid["no_points_x"] * self.grid["no_points_y"] / n_streamtraces
                 )
                 self.seeds.extend(grid_points[::gridskip].tolist())
+                self.streamtraces_color.extend(np.random.choice(self.colors, n_streamtraces))
+
 
             sinks = [[x[0], x[1]] for x in self.source_sink if x[2] < 0]
             if n_cpu > 1:
@@ -377,6 +385,7 @@ class streamLines:
                             compute_trace,
                             maxiter=maxiter,
                             max_sink_dist=max_sink_dist,
+                            max_iter_sink_proximity=max_iter_sink_proximity,
                             sinks=sinks,
                             grid=self.grid,
                             u_i=u_i,
@@ -392,6 +401,7 @@ class streamLines:
                             seed,
                             maxiter=maxiter,
                             max_sink_dist=max_sink_dist,
+                            max_iter_sink_proximity=max_iter_sink_proximity,
                             sinks=sinks,
                             grid=self.grid,
                             u_i=u_i,
