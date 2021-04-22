@@ -16,6 +16,7 @@ class Blob:
         delta=0.1,
         size=10,
         clearance=0,
+        white_val=10,
         pic=[],
         pic_shape=[],
         max_iter=0,
@@ -36,6 +37,7 @@ class Blob:
         self.size = size
         self.pic = pic
         self.max_iter = max_iter
+        self.white_val=white_val
         self.mask = mask
         if self.mask and self.pic:
             raise Exception(
@@ -49,7 +51,7 @@ class Blob:
         img = np.array(img)
         self.pic_shape=np.array(img.shape)/img.shape[0]*self.size
         img = 255 - img
-        img[img == 0] = 15
+        img[img == 0] = self.white_val
         img = img / np.sum(img)
 
         num_loops = 0
