@@ -366,7 +366,6 @@ class streamLines:
                         self._circle_points(p, radius, n_streamstraces_per_source)
                     )
                     self.streamtraces_color.extend((n_streamstraces_per_source + 1) * [np.random.choice(self.colors)])
-                    print(p, self.streamtraces_color)
 
             elif item == "grid":
                 grid_points = np.dstack((self.X.flatten(), self.Y.flatten()))[0]
