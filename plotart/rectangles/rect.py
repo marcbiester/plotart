@@ -10,8 +10,8 @@ class RectanglePacker:
     def generate_random_rectangles(self, num_rectangles: int, h_range: List[int] = [1,10], w_range: List[int] = [1,10]) -> Dict[str, Dict[str, int]]:
         rect_sources = {}
         for i in range(num_rectangles):
-            h = random.randint(1, h_range)
-            w = random.randint(1, w_range)
+            h = random.randint(h_range[0], h_range[1])
+            w = random.randint(w_range[0], w_range[1])
             rect_sources[f"rect{i+1}"] = {"x": 0, "y": 0, "h": h, "w": w}
         return rect_sources
 

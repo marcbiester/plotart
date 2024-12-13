@@ -8,7 +8,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="plotart", # Replace with your own username
-    version="0.0.6",
+    version="0.0.7",
     author="Marc Biester",
     author_email="marc.biester@gmail.com",
     description="A package with tools useful for generating plotable art",
