@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "plotart"
+version = "0.1.0"
+description = "This is a package to generate fluid-dynamics inspired plotting art"
+authors = ["Marc Biester <marc.biester@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "3.12.*"
+numpy = "<2.1.*"
+matplotlib = "^3.9.4"
+shapely = "^2.0.6"
+numba = "^0.60.0"
+svgpathtools = "^1.6.1"
+tqdm = "^4.67.1"
+
+
+[tool.poetry.group.dev.dependencies]
+jupyter = "^1.1.1"
+vpype = "^1.14.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,1 @@
+while true; do name=$(date +%d_%m_%k_%M); vpype -vv script streamline_letter.py scaleto -f 40cm 27.7cm linemerge -t 0.1 linesimplify -t 0.1 linesort --two-opt write --page-size a3 --landscape --center $name.svg; axicli -v -d 38 -u 50 -G 0 -L 2 -T $name.svg > $name.txt 2>&1; done
