@@ -1,4 +1,6 @@
 import numpy as np
+from tqdm import tqdm
+import math
 import matplotlib.pyplot as plt
 from dataclasses import dataclass, field
 from typing import List, Tuple, Iterable, Optional
@@ -145,9 +147,19 @@ class TraceConfig:
     max_steps: int = 2000
     max_points: int = 1500
     max_sink_dist: float = 0.1
-    cutoff_radius: float = 0.0        # NEW: hard stop near any singularity
-    speed_epsilon: float = 1e-6       # stop if |v| < eps
+    cutoff_radius: float = 0.0
+    speed_epsilon: float = 1e-6
     n_jobs: int = 1
+
+    method: str = "rk45"     # options: "rk45", "rk4"
+    rtol: float = 1e-4
+    atol: float = 1e-6
+    dt_min: float = 1e-4
+    dt_max: float = 0.1
+    max_rejects: int = 25    # max consecutive rejects before aborting a trace
+    step_factor: float = 0.2   # fraction of local length scale per step
+
+
 
 
 class StreamTracer:
@@ -220,55 +232,101 @@ class StreamTracer:
             return np.array([np.nan, np.nan])
         return p + dt*(k1 + 2*k2 + 2*k3 + k4)/6.0
 
-    def _rk45_step(self, p, t, dt, rtol=1e-4, atol=1e-6, dt_min=1e-4, dt_max=0.1):
-        """Adaptive RK45 integration step for streamline tracing.
-        Returns: new_point, new_time, new_dt, success
+    def _rk45_step(self, p: np.ndarray, dt: float):
         """
-        def f(point):
+        One adaptive Dormand–Prince RK45 step with error control and a velocity-based ceiling.
+        Returns: (new_point, new_dt, accepted: bool)
+        Uses tolerances and limits from self.cfg (must be set by caller).
+        """
+        cfg = self.cfg  # set by _trace_one before calling us
+
+        def f(point: np.ndarray):
+            # velocity at (x,y) via interpolators; returns None if invalid
             u = self.u_i([point[1], point[0]]).item()
             v = self.v_i([point[1], point[0]]).item()
-            return np.array([u, v])
+            if not (np.isfinite(u) and np.isfinite(v)):
+                return None
+            return np.array([u, v], dtype=float)
 
-        # Butcher tableau for Dormand–Prince RK45
-        c = [0, 1/5, 3/10, 4/5, 8/9, 1, 1]
-        a = [
-            [],
-            [1/5],
-            [3/40, 9/40],
-            [44/45, -56/15, 32/9],
-            [19372/6561, -25360/2187, 64448/6561, -212/729],
-            [9017/3168, -355/33, 46732/5247, 49/176, -5103/18656],
-            [35/384, 0, 500/1113, 125/192, -2187/6784, 11/84]
-        ]
-        b4 = [5179/57600, 0, 7571/16695, 393/640,
-            -92097/339200, 187/2100, 1/40]   # 4th order
-        b5 = [35/384, 0, 500/1113, 125/192,
-            -2187/6784, 11/84, 0]             # 5th order
+        # Dormand–Prince coefficients (7 stages; 5th order with 4th order embedded)
+        a21 = 1/5
+        a31, a32 = 3/40, 9/40
+        a41, a42, a43 = 44/45, -56/15, 32/9
+        a51, a52, a53, a54 = 19372/6561, -25360/2187, 64448/6561, -212/729
+        a61, a62, a63, a64, a65 = 9017/3168, -355/33, 46732/5247, 49/176, -5103/18656
+        a71, a73, a74, a75, a76 = 35/384, 500/1113, 125/192, -2187/6784, 11/84
 
-        k = []
-        k.append(f(p))
-        k.append(f(p + dt * (a[1][0] * k[0])))
-        k.append(f(p + dt * (a[2][0] * k[0] + a[2][1] * k[1])))
-        k.append(f(p + dt * (a[3][0] * k[0] + a[3][1] * k[1] + a[3][2] * k[2])))
-        k.append(f(p + dt * (a[4][0] * k[0] + a[4][1] * k[1] + a[4][2] * k[2] + a[4][3] * k[3])))
-        k.append(f(p + dt * (a[5][0] * k[0] + a[5][1] * k[1] + a[5][2] * k[2] + a[5][3] * k[3] + a[5][4] * k[4])))
-        k.append(f(p + dt * (a[6][0] * k[0] + a[6][2] * k[2] + a[6][3] * k[3] + a[6][4] * k[4] + a[6][5] * k[5])))
+        b4 = np.array([5179/57600, 0.0, 7571/16695, 393/640,
+                    -92097/339200, 187/2100, 1/40])  # 4th order
+        b5 = np.array([35/384,     0.0, 500/1113,  125/192,
+                    -2187/6784, 11/84,         0.0])  # 5th order
 
-        y4 = p + dt * sum(bi * ki for bi, ki in zip(b4, k))
-        y5 = p + dt * sum(bi * ki for bi, ki in zip(b5, k))
+        k1 = f(p)
+        if k1 is None:
+            return p, max(cfg.dt_min, 0.5*dt), False
 
-        # error estimate
+        k2 = f(p + dt*(a21*k1))
+        if k2 is None:
+            return p, max(cfg.dt_min, 0.5*dt), False
+
+        k3 = f(p + dt*(a31*k1 + a32*k2))
+        if k3 is None:
+            return p, max(cfg.dt_min, 0.5*dt), False
+
+        k4 = f(p + dt*(a41*k1 + a42*k2 + a43*k3))
+        if k4 is None:
+            return p, max(cfg.dt_min, 0.5*dt), False
+
+        k5 = f(p + dt*(a51*k1 + a52*k2 + a53*k3 + a54*k4))
+        if k5 is None:
+            return p, max(cfg.dt_min, 0.5*dt), False
+
+        k6 = f(p + dt*(a61*k1 + a62*k2 + a63*k3 + a64*k4 + a65*k5))
+        if k6 is None:
+            return p, max(cfg.dt_min, 0.5*dt), False
+
+        k7 = f(p + dt*(a71*k1 + a73*k3 + a74*k4 + a75*k5 + a76*k6))
+        if k7 is None:
+            return p, max(cfg.dt_min, 0.5*dt), False
+
+        K = [k1, k2, k3, k4, k5, k6, k7]
+        y4 = p + dt * sum(bi * ki for bi, ki in zip(b4, K))
+        y5 = p + dt * sum(bi * ki for bi, ki in zip(b5, K))
+
         err = np.linalg.norm(y5 - y4, ord=np.inf)
+        if not np.isfinite(err):
+            return p, max(cfg.dt_min, 0.5*dt), False
 
-        tol = atol + rtol * max(np.linalg.norm(p, ord=np.inf), np.linalg.norm(y5, ord=np.inf))
+        # Tolerance based on state magnitude (classic embedded controller)
+        tol = cfg.atol + cfg.rtol * max(np.linalg.norm(p, ord=np.inf),
+                                        np.linalg.norm(y5, ord=np.inf))
 
-        if err <= tol:  # accept step
-            # new dt suggestion
-            dt_new = min(dt_max, max(dt_min, dt * min(5, 0.9 * (tol / err)**0.2)))
-            return y5, t + dt, dt_new, True
-        else:  # reject step
-            dt_new = max(dt_min, dt * max(0.1, 0.9 * (tol / err)**0.25))
-            return p, t, dt_new, False
+        # Propose new dt (limit growth/shrink)
+        if err == 0.0:
+            fac = 5.0
+            accepted = True
+        else:
+            accepted = err <= tol
+            # use exponent 1/5 for 5th order
+            fac = 0.9 * (tol / err)**0.2
+            fac = min(5.0, max(0.1, fac))
+        dt_new = dt * fac
+
+        # --- velocity-based ceiling (limit *physical* step length) ---
+        v_here = k1  # velocity at p
+        vnorm = np.linalg.norm(v_here)
+        if vnorm > 1e-12:
+            max_phys_dt = cfg.step_factor / vnorm
+            dt_new = min(dt_new, max_phys_dt)
+
+        # Clamp to [dt_min, dt_max]
+        dt_new = min(cfg.dt_max, max(cfg.dt_min, dt_new))
+
+        # Return the higher-order (y5) solution on accept, otherwise unchanged p
+        return (y5 if accepted else p), dt_new, accepted
+
+
+
 
 
     def _within_cutoff(self, p: np.ndarray, r: float) -> bool:
@@ -283,11 +341,20 @@ class StreamTracer:
         return np.any(d2 <= r*r)
 
     def _trace_one(self, seed: np.ndarray, cfg: TraceConfig) -> np.ndarray:
+        # let _rk45_step see tolerances/limits
+        self.cfg = cfg
+
         p = np.array(seed, dtype=float)
         pts = [p.copy()]
         steps = 0
+
+        # RK45 state
+        t = 0.0
+        dt = cfg.dt
+        consecutive_rejects = 0
+
         while steps < cfg.max_steps and len(pts) < cfg.max_points and self.field.grid.contains(p):
-            # cutoff near any singularity (hard stop)
+            # hard stop near any singularity
             if self._within_cutoff(p, cfg.cutoff_radius):
                 break
 
@@ -295,16 +362,44 @@ class StreamTracer:
             if not np.all(np.isfinite(v)) or np.linalg.norm(v) < cfg.speed_epsilon:
                 break
 
-            # terminate when close to sink (classic behaviour)
+            # classic termination near sinks
             if self._near_sink(p, cfg.max_sink_dist):
                 break
 
-            p = self._rk4_step(p, cfg.dt)
-            if not np.all(np.isfinite(p)):
-                break
-            pts.append(p.copy())
-            steps += 1
+            if cfg.method.lower() == "rk4":
+                p_new = self._rk4_step(p, cfg.dt)
+                if not np.all(np.isfinite(p_new)):
+                    break
+                p = p_new
+                t += cfg.dt
+                pts.append(p.copy())
+                steps += 1
+                continue
+
+            # ---- RK45 adaptive step (default) ----
+            attempt = 0
+            while True:
+                p_candidate, dt_new, ok = self._rk45_step(p, dt)
+                if ok:
+                    # accepted: advance
+                    t += dt
+                    p = p_candidate
+                    dt = dt_new
+                    pts.append(p.copy())
+                    steps += 1
+                    consecutive_rejects = 0
+                    break
+                else:
+                    # rejected: shrink dt and retry
+                    attempt += 1
+                    consecutive_rejects += 1
+                    dt = dt_new
+                    if dt <= cfg.dt_min + 1e-15 or attempt >= cfg.max_rejects:
+                        # cannot make progress; end this streamline gracefully
+                        return np.array(pts)
+
         return np.array(pts)
+
 
     # Public API
     def trace(self, seeds: np.ndarray, cfg: Optional[TraceConfig] = None) -> List[np.ndarray]:
@@ -313,12 +408,36 @@ class StreamTracer:
         n_jobs = min(max(1, cfg.n_jobs), cpu_count())
         seeds = np.asarray(seeds, dtype=float).reshape(-1, 2)
 
+        # --- Single-process: full tqdm ---
         if n_jobs == 1:
-            self.traces = [self._trace_one(s, cfg) for s in seeds]
-        else:
-            with Pool(processes=n_jobs) as pool:
-                self.traces = pool.starmap(_trace_one_helper, [(s, cfg, self.field, self.sinks) for s in seeds])
+            iterator = seeds
+            if tqdm is not None:
+                iterator = tqdm(seeds, desc="Tracing", unit="seed")
+            self.traces = [self._trace_one(s, cfg) for s in iterator]
+            return self.traces
+
+        # --- Multi-process: preserve order with starmap + rough % after batches ---
+        batch_size = 50  # change here if you want different granularity
+        total = len(seeds)
+        self.traces = []
+
+        with Pool(processes=n_jobs) as pool:
+            # process in ordered batches so we can print coarse progress without reordering results
+            for start in range(0, total, batch_size):
+                end = min(start + batch_size, total)
+                batch = seeds[start:end]
+                args = [(s, cfg, self.field, self.sinks) for s in batch]
+                # starmap preserves input order
+                batch_traces = pool.starmap(_trace_one_helper, args)
+                self.traces.extend(batch_traces)
+
+                # rough progress print (works even without tqdm)
+                done = end
+                pct = int(done * 100 / total)
+                print(f"[trace] {done}/{total} ({pct}%)")
+
         return self.traces
+
 
     def plot(self, show=True, figsize: Tuple[int, int]=(10, 8)):
         fig, ax = plt.subplots(figsize=figsize)
@@ -387,7 +506,18 @@ if __name__ == "__main__":
     ])
 
     # Hard cutoff near singularities so we stop before jittering
-    cfg = TraceConfig(dt=0.005, max_steps=8000, cutoff_radius=0.15, n_jobs=min(8, cpu_count()))
+    cfg = TraceConfig(
+        dt=0.002,
+        rtol=1e-6,
+        atol=1e-8,
+        dt_min=1e-5,
+        dt_max=0.02,
+        max_steps=8000,
+        cutoff_radius=0.15,
+        step_factor=0.2,
+        n_jobs=min(8, cpu_count())
+    )
+
     tracer.trace(seeds, cfg)
     tracer.plot()
-    tracer.write_svg("streamlines.svg", height=600, width=800)
+    tracer.write_svg("streamlines.svg", height=600, width=600)
