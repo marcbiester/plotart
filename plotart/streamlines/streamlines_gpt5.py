@@ -455,22 +455,61 @@ class StreamTracer:
             plt.show()
         return fig, ax
     
-    def write_svg(self, file, height=5, width=5, offset_x=0, offset_y=0):
-        """Export streamlines to SVG (self.traces)."""
+    def write_svg(
+        self,
+        file,
+        target_width_px: int = 1200,
+        target_height_px: int = None,
+        offset_x: float = 0.0,
+        offset_y: float = 0.0,
+        stroke: str = "black",
+        stroke_width: float = 0.06,
+        non_scaling_stroke: bool = True,
+    ):
+        """
+        Export streamlines to SVG.
+
+        - Coordinates are in data units (1 unit = 1 viewBox unit).
+        - The on-screen size is controlled by width/height in pixels.
+        - If target_height_px is None, it’s computed to preserve aspect.
+        """
         gx = self.field.grid
         dx = gx.x_end - gx.x_start
         dy = gx.y_end - gx.y_start
-        fx = width / dx
-        fy = height / dy
+        if dx <= 0 or dy <= 0:
+            raise ValueError("Invalid grid extents")
 
-        with open(file, "w") as f:
-            f.write(f'<svg height="{height}" width="{width}" xmlns="http://www.w3.org/2000/svg">\n')
+        if target_height_px is None:
+            target_height_px = int(round(target_width_px * dy / dx))
+
+        def x_u(x):  # user units (viewBox space)
+            return (x - gx.x_start) + offset_x
+
+        def y_u(y):
+            # flip Y so 'up' remains up in the rendered image
+            return (gx.y_end - y) + offset_y
+
+        vector_effect = ' vector-effect="non-scaling-stroke"' if non_scaling_stroke else ""
+
+        with open(file, "w", encoding="utf-8") as f:
+            f.write(
+                f'<svg xmlns="http://www.w3.org/2000/svg" '
+                f'width="{target_width_px}" height="{target_height_px}" '
+                f'viewBox="0 0 {dx} {dy}" preserveAspectRatio="xMidYMid meet">\n'
+            )
+            f.write(f'<g fill="none" stroke="{stroke}" stroke-width="{stroke_width}"{vector_effect}>\n')
+
             for streamline in self.traces:
-                if len(streamline) >= 2:
-                    path = f'M {streamline[0,0]*fx + offset_x} {streamline[0,1]*fy + offset_y} '
-                    path += " ".join(f"L {p[0]*fx + offset_x} {p[1]*fy + offset_y}" for p in streamline[1:])
-                    f.write(f'<path d="{path}" stroke="black" fill="none" />\n')
-            f.write("</svg>\n")
+                if len(streamline) < 2:
+                    continue
+                parts = [f'M {x_u(streamline[0,0]):.6g} {y_u(streamline[0,1]):.6g}']
+                for p in streamline[1:]:
+                    parts.append(f'L {x_u(p[0]):.6g} {y_u(p[1]):.6g}')
+                f.write(f'  <path d="{" ".join(parts)}" />\n')
+
+            f.write('</g>\n</svg>\n')
+
+
 
 
 # Helper for multiprocessing (top-level function, picklable)

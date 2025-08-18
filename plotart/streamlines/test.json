@@ -1,0 +1,49 @@
+{
+  "grid": {
+    "x_start": 0.0,
+    "x_end": 10.0,
+    "y_start": 0.0,
+    "y_end": 10.0,
+    "nx": 120,
+    "ny": 120,
+    "core_radius": 0.1
+  },
+  "elements": {
+    "sources_sinks": [],
+    "vortices": [],
+    "doublets": [
+      {
+        "x": 4.9262977378704385,
+        "y": 5.302580703174176,
+        "strength": 2.0
+      }
+    ]
+  },
+  "freestream": {
+    "u_inf": 0.0,
+    "v_inf": 0.0
+  },
+  "seeding": {
+    "mode": "grid",
+    "seed_count": 200,
+    "source_seed_radius": 0.15,
+    "rng_seed": 42
+  },
+  "integrator": {
+    "method": "rk45",
+    "dt": 0.005,
+    "rtol": 1e-05,
+    "atol": 1e-07,
+    "dt_min": 1e-05,
+    "dt_max": 0.03,
+    "max_steps": 8000,
+    "cutoff_radius": 0.15,
+    "speed_epsilon": 1e-06,
+    "step_factor": 0.2,
+    "n_jobs": 6
+  },
+  "meta": {
+    "app": "streamlines_gui",
+    "version": 1
+  }
+}

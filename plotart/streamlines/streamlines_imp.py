@@ -183,21 +183,80 @@ class StreamLines:
                 for seed in self.seeds
             ]
 
-    def write_svg(self, file, height=297, width=420, offset_x=210, offset_y=148.5):
-        """Export streamlines to SVG."""
-        dx = self.grid["x_end"] - self.grid["x_start"]
-        fx = width / dx
-        dy = self.grid["y_end"] - self.grid["y_start"]
-        fy = height / dy
+    def write_svg(self, file, width=800, height=800, offset_x=0, offset_y=0,
+                flip_y=True, preserve_aspect=True, stroke="black", stroke_width=1.0):
+        """
+        Export streamlines to SVG with correct coordinate mapping.
 
-        with open(file, "w") as f:
-            f.write(f'<svg height="{height}" width="{width}">')
-            for streamline in self.streamtraces:
-                if len(streamline) > 2:
-                    path = f'M {streamline[0][0]*fx + offset_x} {streamline[0][1]*fy + offset_y} '
-                    path += " ".join(f"L {p[0]*fx + offset_x} {p[1]*fy + offset_y}" for p in streamline[1:])
-                    f.write(f'<path d="{path}" stroke="black" fill="none" />\n')
-            f.write("</svg>")
+        Parameters
+        ----------
+        width, height : int
+            SVG canvas size in px.
+        offset_x, offset_y : float
+            Extra pixel offsets after the data->pixel transform.
+        flip_y : bool
+            If True (default), flip Y to match SVG's downward Y-axis so the plot
+            visually matches Matplotlib (math coordinates).
+        preserve_aspect : bool
+            If True (default), use uniform scale (min of sx, sy) and center the content.
+            If False, use independent x/y scales (content stretches to fill).
+        """
+        gx = self.field.grid
+        dx = gx.x_end - gx.x_start
+        dy = gx.y_end - gx.y_start
+        if dx <= 0 or dy <= 0:
+            raise ValueError("Invalid grid extents")
+
+        # per-axis scales
+        sx = width / dx
+        sy = height / dy
+
+        # Optional uniform scaling + centering
+        if preserve_aspect:
+            s = min(sx, sy)
+            # center content inside the canvas
+            pad_x = (width  - s * dx) * 0.5
+            pad_y = (height - s * dy) * 0.5
+            def x_pix(x):
+                return pad_x + (x - gx.x_start) * s + offset_x
+            if flip_y:
+                def y_pix(y):
+                    # flip so larger y maps upward visually (like Matplotlib)
+                    return pad_y + (gx.y_end - y) * s + offset_y
+            else:
+                def y_pix(y):
+                    return pad_y + (y - gx.y_start) * s + offset_y
+        else:
+            # Fill entire canvas; non-uniform scaling
+            def x_pix(x):
+                return (x - gx.x_start) * sx + offset_x
+            if flip_y:
+                def y_pix(y):
+                    return (gx.y_end - y) * sy + offset_y
+            else:
+                def y_pix(y):
+                    return (y - gx.y_start) * sy + offset_y
+
+        with open(file, "w", encoding="utf-8") as f:
+            f.write(f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" ')
+            f.write(f'viewBox="0 0 {width} {height}">\n')
+
+            # style once (optional)
+            f.write(f'<g fill="none" stroke="{stroke}" stroke-width="{stroke_width}">\n')
+
+            for streamline in self.traces:
+                if len(streamline) < 2:
+                    continue
+                # MoveTo first point (transformed), then LineTos
+                x0, y0 = x_pix(streamline[0, 0]), y_pix(streamline[0, 1])
+                parts = [f'M {x0:.3f} {y0:.3f}']
+                for p in streamline[1:]:
+                    xp, yp = x_pix(p[0]), y_pix(p[1])
+                    parts.append(f'L {xp:.3f} {yp:.3f}')
+                f.write(f'  <path d="{" ".join(parts)}" />\n')
+
+            f.write('</g>\n</svg>\n')
+
 
     def plot(self, num_level=25, legend=True):
         """Plot stream function contour."""
